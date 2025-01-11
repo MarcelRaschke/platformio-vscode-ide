@@ -7,12 +7,13 @@
  */
 
 import { CONFLICTED_EXTENSION_IDS } from './constants';
+import { extension } from './main';
 import vscode from 'vscode';
 
-export async function maybeRateExtension(stateStorage) {
+export async function maybeRateExtension() {
   const stateKey = 'rate-extension';
   const askAfterSessionNums = 13;
-  let state = stateStorage.getValue(stateKey);
+  let state = extension.context.globalState.get(stateKey);
   if (state && state.done) {
     return;
   } else if (!state || !state.callCounter) {
@@ -24,7 +25,7 @@ export async function maybeRateExtension(stateStorage) {
 
   state.callCounter += 1;
   if (state.callCounter < askAfterSessionNums) {
-    stateStorage.setValue(stateKey, state);
+    extension.context.globalState.update(stateKey, state);
     return;
   }
 
@@ -33,14 +34,14 @@ export async function maybeRateExtension(stateStorage) {
       'It will not take more than one minute. Thanks for your support!',
     { title: 'Rate PlatformIO IDE Extension', isCloseAffordance: false },
     { title: 'Remind later', isCloseAffordance: false },
-    { title: 'No, Thanks', isCloseAffordance: true }
+    { title: 'No, Thanks', isCloseAffordance: true },
   );
 
   switch (selectedItem ? selectedItem.title : undefined) {
     case 'Rate PlatformIO IDE Extension':
       vscode.commands.executeCommand(
         'vscode.open',
-        vscode.Uri.parse('http://bit.ly/pio-vscode-rate')
+        vscode.Uri.parse('http://bit.ly/pio-vscode-rate'),
       );
       state.done = true;
       break;
@@ -50,12 +51,12 @@ export async function maybeRateExtension(stateStorage) {
     default:
       state.callCounter = 0;
   }
-  stateStorage.setValue(stateKey, state);
+  extension.context.globalState.update(stateKey, state);
 }
 
 export async function warnAboutConflictedExtensions() {
   const conflicted = vscode.extensions.all.filter(
-    (ext) => ext.isActive && CONFLICTED_EXTENSION_IDS.includes(ext.id)
+    (ext) => ext.isActive && CONFLICTED_EXTENSION_IDS.includes(ext.id),
   );
   if (conflicted.length === 0) {
     return;
@@ -68,20 +69,20 @@ export async function warnAboutConflictedExtensions() {
       'Please disable or uninstall them (Menu > View > Extensions).',
     { title: 'More details', isCloseAffordance: false },
     { title: 'Uninstall conflicted', isCloseAffordance: false },
-    { title: 'Remind later', isCloseAffordance: true }
+    { title: 'Remind later', isCloseAffordance: true },
   );
   switch (selectedItem ? selectedItem.title : undefined) {
     case 'More details':
       vscode.commands.executeCommand(
         'vscode.open',
-        vscode.Uri.parse('http://bit.ly/pio-vscode-conflicted-extensions')
+        vscode.Uri.parse('http://bit.ly/pio-vscode-conflicted-extensions'),
       );
       break;
     case 'Uninstall conflicted':
       conflicted.forEach((ext) => {
         vscode.commands.executeCommand(
           'workbench.extensions.uninstallExtension',
-          ext.id
+          ext.id,
         );
       });
       vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -89,7 +90,7 @@ export async function warnAboutConflictedExtensions() {
   }
 }
 
-export async function warnAboutInoFile(editor, stateStorage) {
+export async function warnAboutInoFile(editor) {
   if (!editor || !editor.document || !editor.document.fileName) {
     return;
   }
@@ -97,7 +98,7 @@ export async function warnAboutInoFile(editor, stateStorage) {
     return;
   }
   const stateKey = 'ino-warn-disabled';
-  if (stateStorage.getValue(stateKey)) {
+  if (extension.context.globalState.get(stateKey)) {
     return;
   }
 
@@ -107,17 +108,17 @@ export async function warnAboutInoFile(editor, stateStorage) {
       'Please convert .INO sketch into the valid .CPP file.',
     { title: 'Show instruction', isCloseAffordance: false },
     { title: 'Do not show again', isCloseAffordance: false },
-    { title: 'Remind later', isCloseAffordance: true }
+    { title: 'Remind later', isCloseAffordance: true },
   );
   switch (selectedItem ? selectedItem.title : undefined) {
     case 'Show instruction':
       vscode.commands.executeCommand(
         'vscode.open',
-        vscode.Uri.parse('https://bit.ly/convert-ino-to-cpp')
+        vscode.Uri.parse('https://bit.ly/convert-ino-to-cpp'),
       );
       break;
     case 'Do not show again':
-      stateStorage.setValue(stateKey, 1);
+      extension.context.globalState.update(stateKey, 1);
       break;
   }
 }

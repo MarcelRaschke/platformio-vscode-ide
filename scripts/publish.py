@@ -14,6 +14,7 @@
 
 import os
 import shutil
+import sys
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +35,7 @@ class PlatformItem:
 
 PLATFORM_LIST = [
     PlatformItem("win32-arm64"),
-    PlatformItem("win32-ia32", "windows_x86"),
+    # PlatformItem("win32-ia32", "windows_x86"),
     PlatformItem("win32-x64", "windows_amd64"),
     PlatformItem("linux-arm64"),
     PlatformItem("linux-armhf"),
@@ -83,9 +84,8 @@ if __name__ == "__main__":
                 "npx",
                 "vsce",
                 "publish",
-                "--allow-star-activation",
                 "--target",
                 item.target,
-            ],
+            ] + sys.argv[1:],
             cwd=ROOT_DIR,
         )

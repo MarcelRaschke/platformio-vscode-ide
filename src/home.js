@@ -8,11 +8,10 @@
 
 import * as pioNodeHelpers from 'platformio-node-helpers';
 
+import { disposeSubscriptions, notifyError } from './utils';
+import { getPIOProjectDirs, updateProjectItemState } from './project/helpers';
 import { IS_OSX } from './constants';
-import ProjectObservable from './project/observable';
-import crypto from 'crypto';
 import { extension } from './main';
-import { notifyError } from './utils';
 import path from 'path';
 import vscode from 'vscode';
 
@@ -26,8 +25,31 @@ export default class PIOHome {
 
     // close PIO Home when workspaces folders are changed (VSCode reactivates extensiuon)
     this.subscriptions.push(
-      vscode.workspace.onDidChangeWorkspaceFolders(this.disposePanel.bind(this))
+      vscode.workspace.onDidChangeWorkspaceFolders(this.disposePanel.bind(this)),
     );
+  }
+
+  static async shutdownAllServers() {
+    await pioNodeHelpers.home.shutdownServer();
+    await pioNodeHelpers.home.shutdownAllServers();
+  }
+
+  onPanelDisposed() {
+    this._currentPanel = undefined;
+  }
+
+  disposePanel() {
+    if (!this._currentPanel) {
+      return;
+    }
+    this._currentPanel.dispose();
+    this._currentPanel = undefined;
+  }
+
+  dispose() {
+    pioNodeHelpers.home.shutdownServer();
+    this.disposePanel();
+    disposeSubscriptions(this.subscriptions);
   }
 
   async toggle(startUrl = PIOHome.defaultStartUrl) {
@@ -55,7 +77,7 @@ export default class PIOHome {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-      }
+      },
     );
     this.subscriptions.push(panel.onDidDispose(this.onPanelDisposed.bind(this)));
     panel.iconPath = vscode.Uri.file(
@@ -63,8 +85,8 @@ export default class PIOHome {
         extension.context.extensionPath,
         'assets',
         'images',
-        'platformio-mini-logo.svg'
-      )
+        'platformio-mini-logo.svg',
+      ),
     );
     panel.webview.html = this.getLoadingContent();
     try {
@@ -97,21 +119,31 @@ export default class PIOHome {
   async getWebviewContent(startUrl) {
     this._lastStartUrl = startUrl;
     await pioNodeHelpers.home.ensureServerStarted({
-      port: extension.getSetting('pioHomeServerHttpPort'),
-      host: extension.getSetting('pioHomeServerHttpHost'),
+      port: extension.getConfiguration('pioHomeServerHttpPort'),
+      host: extension.getConfiguration('pioHomeServerHttpHost'),
       onIDECommand: await this.onIDECommand.bind(this),
     });
     const theme = this.getTheme();
-    const iframeId =
-      'pioHomeIFrame-' +
-      crypto.createHash('sha1').update(crypto.randomBytes(512)).digest('hex');
+    const iframeId = `pioHomeIFrame-${vscode.env.sessionId}`;
     const iframeScript = `
 <script>
-  for (const command of ['selectAll', 'copy', 'paste', 'cut', 'undo', 'redo']) {
+  function execCommand(data) {
+    document.getElementById('${iframeId}').contentWindow.postMessage({'command': 'execCommand', 'data': data}, '*');
+  }
+  for (const command of ['copy', 'paste', 'cut']) {
     document.addEventListener(command, (e) => {
-      document.getElementById('${iframeId}').contentWindow.postMessage({'command': 'execCommand', 'data': command}, '*');
+      execCommand(command);
     });
   }
+  document.addEventListener('selectstart', (e) => {
+    execCommand('selectAll');
+    e.preventDefault();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'z' && e.metaKey) {
+      execCommand(e.shiftKey ? 'redo' : 'undo');
+    }
+  });
   window.addEventListener('message', (e) => {
     if (e.data.command === 'kbd-event') {
       window.dispatchEvent(new KeyboardEvent('keydown', e.data.data));
@@ -126,10 +158,10 @@ export default class PIOHome {
         theme === 'light' ? '#FFF' : '#1E1E1E'
       }">
         <iframe id="${iframeId}" src="${pioNodeHelpers.home.getFrontendUrl({
-      start: startUrl,
-      theme,
-      workspace: extension.getEnterpriseSetting('defaultPIOHomeWorkspace'),
-    })}"
+          start: startUrl,
+          theme,
+          workspace: extension.getEnterpriseSetting('defaultPIOHomeWorkspace'),
+        })}"
           width="100%"
           height="100%"
           frameborder="0"
@@ -151,20 +183,18 @@ export default class PIOHome {
   }
 
   onOpenProjectCommand(params) {
-    if (extension.projectObservable) {
-      extension.projectObservable.saveProjectStateItem(
-        vscode.Uri.file(params).fsPath,
-        'activeEnv',
-        undefined
-      );
-      extension.projectObservable.switchToProject(vscode.Uri.file(params).fsPath);
+    if (extension.projectManager) {
+      updateProjectItemState(vscode.Uri.file(params).fsPath, 'selectedEnv', undefined);
+      extension.projectManager.switchToProject(vscode.Uri.file(params).fsPath, {
+        force: true,
+      });
     }
     this.disposePanel();
     if (vscode.workspace.workspaceFolders) {
       vscode.workspace.updateWorkspaceFolders(
         vscode.workspace.workspaceFolders.length,
         null,
-        { uri: vscode.Uri.file(params) }
+        { uri: vscode.Uri.file(params) },
       );
     } else {
       vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(params));
@@ -177,35 +207,17 @@ export default class PIOHome {
     const editor = await vscode.window.showTextDocument(vscode.Uri.file(params.path));
     const gotoPosition = new vscode.Position(
       (params.line || 1) - 1,
-      (params.column || 1) - 1
+      (params.column || 1) - 1,
     );
     editor.selection = new vscode.Selection(gotoPosition, gotoPosition);
     editor.revealRange(
       new vscode.Range(gotoPosition, gotoPosition),
-      vscode.TextEditorRevealType.InCenter
+      vscode.TextEditorRevealType.InCenter,
     );
     return true;
   }
 
   onGetPIOProjectDirs() {
-    return ProjectObservable.getPIOProjectDirs();
-  }
-
-  onPanelDisposed() {
-    this._currentPanel = undefined;
-  }
-
-  disposePanel() {
-    if (!this._currentPanel) {
-      return;
-    }
-    this._currentPanel.dispose();
-    this._currentPanel = undefined;
-  }
-
-  dispose() {
-    this.disposePanel();
-    pioNodeHelpers.misc.disposeSubscriptions(this.subscriptions);
-    pioNodeHelpers.home.shutdownServer();
+    return getPIOProjectDirs();
   }
 }
